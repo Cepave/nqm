@@ -1,32 +1,31 @@
 package main
 
-import "log"
-
-type ParamToAgent struct {
-	Metric      string      `json:"metric"`
-	Endpoint    string      `json:"endpoint"`
-	Value       interface{} `json:"value"`
-	CounterType string      `json:"counterType"`
-	Tags        string      `json:"tags"`
-	Timestamp   int64       `json:"timestamp"`
-	Step        int64       `json:"step"`
-}
+import (
+	"flag"
+	"fmt"
+	"log"
+	"os"
+)
 
 func init() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	InitGeneralConfig()
-	InitRPC()
 }
 
 func main() {
-	probingCmd, err := QueryTask()
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	log.Println("Execution the probing command:", probingCmd[0])
+	cfgFilePtr := flag.String("c", "cfg.json", "nqm's configuration file")
+	version := flag.Bool("v", false, "show version")
+	flag.Parse()
 
-	rawData := Probe(probingCmd)
-	jsonParams := MarshalIntoParameters(rawData)
-	Push(jsonParams)
+	if *version {
+		fmt.Println(VERSION)
+		os.Exit(0)
+	}
+
+	InitGeneralConfig(*cfgFilePtr)
+	InitRPC()
+
+	go QueryHbs()
+	Measure()
+
+	select {}
 }
