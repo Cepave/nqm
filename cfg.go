@@ -8,10 +8,17 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/Cepave/common/model"
 	"github.com/toolkits/file"
 )
+
+type MeasurementsProperty struct {
+	interval time.Duration
+	enabled  bool
+}
 
 type AgentConfig struct {
 	PushURL         string `json:"pushURL"`
@@ -35,17 +42,26 @@ type JSONConfigFile struct {
 
 type GeneralConfig struct {
 	JSONConfigFile
-	hbsResp      model.NqmPingTaskResponse
+	hbsResp      atomic.Value // for receiving model.NqmPingTaskResponse
 	Hostname     string
 	IPAddress    string
 	ConnectionID string
+	Measurements map[string]MeasurementsProperty
 }
 
 var (
 	jsonConfig    *JSONConfigFile
 	generalConfig *GeneralConfig
-	lock          = new(sync.RWMutex)
+	jsonCfgLock   = new(sync.RWMutex)
 )
+
+func NewMeasurements() map[string]MeasurementsProperty {
+	return map[string]MeasurementsProperty{
+		"fping":   {time.Duration(GetGeneralConfig().Agent.FpingInterval), false},
+		"tcpping": {time.Duration(GetGeneralConfig().Agent.TcppingInterval), false},
+		"tcpconn": {time.Duration(GetGeneralConfig().Agent.TcpconnInterval), false},
+	}
+}
 
 func getBinAbsPath() string {
 	bin, err := filepath.Abs(os.Args[0])
@@ -79,8 +95,8 @@ func PublicIP() (string, error) {
 }
 
 func getJSONConfig() *JSONConfigFile {
-	lock.RLock()
-	defer lock.RUnlock()
+	jsonCfgLock.RLock()
+	defer jsonCfgLock.RUnlock()
 	return jsonConfig
 }
 
@@ -95,6 +111,10 @@ func getHostname() string {
 	if err != nil {
 		log.Fatalln("os.Hostname() ERROR:", err)
 	}
+	// hostname -s
+	// -s, --short
+	// Display the short host name. This is the host name cut at the first dot.
+	hostname = strings.Split(hostname, ".")[0]
 	log.Println("Hostname not set in config, using system's hostname...succeeded: [", hostname, "]")
 
 	return hostname
@@ -153,8 +173,8 @@ func loadJSONConfig(cfgFile string) {
 		log.Fatalln("Parsing configuration file [", cfgFile, "] failed:", err)
 	}
 
-	lock.Lock()
-	defer lock.Unlock()
+	jsonCfgLock.Lock()
+	defer jsonCfgLock.Unlock()
 
 	jsonConfig = &c
 
@@ -172,8 +192,9 @@ func InitGeneralConfig(cfgFilePath string) {
 	loadJSONConfig(cfgFilePath)
 	cfg.Agent = getJSONConfig().Agent
 	cfg.Hbs = getJSONConfig().Hbs
-	cfg.hbsResp = model.NqmPingTaskResponse{}
+	cfg.hbsResp.Store(model.NqmPingTaskResponse{})
 	cfg.Hostname = getHostname()
 	cfg.IPAddress = getIP()
 	cfg.ConnectionID = getConnectionID()
+	cfg.Measurements = NewMeasurements()
 }
